@@ -28,6 +28,9 @@ jobs:
         # Official Astro action: installs deps, runs `astro build`,
         # and uploads dist/ as the Pages artifact.
         uses: withastro/action@v3
+        with:
+          # The action defaults to Node 20; Astro 7 needs 22.12+.
+          node-version: 24
 
   deploy:
     needs: build
