@@ -1,0 +1,392 @@
+---
+import fs from 'node:fs';
+import path from 'node:path';
+import { getCollection, render } from 'astro:content';
+import Layout from '../layouts/Layout.astro';
+import SolarSystemCanvas from '../components/scene/SolarSystemCanvas';
+import Minimap from '../components/ui/Minimap';
+import ContentModal from '../components/ui/ContentModal';
+import PlanetGrid from '../components/ui/PlanetGrid';
+import HeroCard from '../components/ui/HeroCard';
+import { SITE } from '../config';
+import type { PlanetData } from '../types';
+
+const entries = (await getCollection('planets')).sort(
+  (a, b) => a.data.orbitRadius - b.data.orbitRadius,
+);
+
+// Derive all render config from frontmatter — no hardcoded planet lists.
+// Golden-angle phase spacing spreads planets evenly around the sun so no
+// side of the frame looks empty.
+const GOLDEN_ANGLE = 2.39996;
+// Normalize frontmatter orbit radii into a fixed world-unit range so the
+// camera framing always fits, no matter what values content authors use.
+// Relative spacing between planets is preserved.
+const radii = entries.map((e) => e.data.orbitRadius);
+const minOrbit = Math.min(...radii);
+const maxOrbit = Math.max(...radii);
+const worldOrbit = (r: number) =>
+  maxOrbit === minOrbit ? 28 : 10 + ((r - minOrbit) / (maxOrbit - minOrbit)) * 36; // 10–46
+// Global multiplier on planet sizes so they read prominently at the
+// resting camera distance — tune here instead of per content file.
+const PLANET_SCALE = 1.3;
+// One shared angular speed for every planet: with golden-angle phases the
+// relative separation between planets is locked in permanently, so two
+// planets can never drift into each other no matter how long the page runs.
+const ORBIT_SPEED = 0.045;
+
+// Auto-discover per-planet gallery images. Drop image files into
+// public/assets/gallery/<planet-id>/ and they appear in that planet's modal —
+// no frontmatter needed. This runs at build time on Node, so it re-scans on
+// every build/dev restart. Files sort by name (prefix "01-", "02-" to order).
+const IMAGE_EXT = /\.(jpe?g|png|webp|avif|gif)$/i;
+const galleryFor = (id: string): string[] => {
+  const dir = path.join(process.cwd(), 'public', 'assets', 'gallery', id);
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => IMAGE_EXT.test(f))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map((f) => `/assets/gallery/${id}/${f}`);
+  } catch {
+    return []; // folder doesn't exist yet — that's fine
+  }
+};
+
+const planets: PlanetData[] = entries.map((e, i) => ({
+  phase: i * GOLDEN_ANGLE,
+  id: e.id,
+  title: e.data.title,
+  description: e.data.description,
+  attachment: e.data.attachment,
+  tags: e.data.tags,
+  category: e.data.category,
+  color: e.data.planetColor,
+  orbitRadius: worldOrbit(e.data.orbitRadius),
+  orbitSpeed: ORBIT_SPEED,
+  size: (e.data.planetSize ?? 1 + e.data.orbitRadius / maxOrbit) * PLANET_SCALE,
+  texture: e.data.texture,
+  ringColor: e.data.ringColor,
+  links: e.data.links,
+  gallery: galleryFor(e.id),
+}));
+
+const rendered = await Promise.all(
+  entries.map(async (entry) => ({ id: entry.id, Content: (await render(entry)).Content })),
+);
+
+// About Me for the top-left modal: markdown from src/content/pages/about.md,
+// photos dropped into public/assets/gallery/about/ (same drop-in pattern as
+// the planet galleries).
+const aboutEntry = (await getCollection('pages')).find((e) => e.id === 'about');
+const AboutContent = aboutEntry ? (await render(aboutEntry)).Content : null;
+const aboutImages = galleryFor('about');
+---
+
+<Layout title={`${SITE.name} — My Solar System`} description={SITE.tagline}>
+  <!-- 3D canvas layer: fixed so it stays behind the scrolling content -->
+  <div class="fixed inset-0 z-0">
+    <SolarSystemCanvas client:only="react" planets={planets} />
+  </div>
+
+  <Minimap client:load planets={planets} />
+  <ContentModal client:load planets={planets} />
+
+  <!-- pointer-events-none lets clicks in the hero fall through to the 3D
+       canvas; the content wrapper re-enables them for its own elements -->
+  <main class="pointer-events-none relative z-10">
+    <!-- Hero: full-viewport window onto the solar system -->
+    <section class="pointer-events-none flex h-screen flex-col justify-between p-6">
+      <header class="pointer-events-auto w-fit">
+        <HeroCard
+          client:load
+          name={SITE.name}
+          tagline={SITE.tagline}
+          hint={SITE.heroHint}
+          howTo={SITE.howTo}
+          images={aboutImages}
+        />
+      </header>
+      <div class="scroll-cue flex flex-col items-center gap-1 pb-2 text-white/40">
+        <span class="text-xs uppercase tracking-widest">Scroll for more</span>
+        <span class="text-lg">↓</span>
+      </div>
+    </section>
+
+    <!-- Glassy portfolio sections -->
+    <div id="portfolio-sections" class="pointer-events-auto relative mx-auto flex max-w-4xl flex-col gap-16 px-6 pb-24">
+      <section class="reveal rounded-3xl border border-white/10 bg-white/5 p-8 backdrop-blur-xl sm:p-10">
+        <h2 class="text-sm uppercase tracking-widest text-white/40">About</h2>
+        <p class="mt-4 text-2xl font-semibold leading-snug text-white sm:text-3xl">
+          Hi, I’m {SITE.name}.
+        </p>
+        {SITE.about.map((para) => <p class="mt-4 leading-relaxed text-white/70">{para}</p>)}
+        <dl class="mt-8 flex flex-wrap gap-4">
+          {
+            SITE.stats.map((stat) => (
+              <div class="rounded-2xl border border-white/10 bg-black/20 px-6 py-4 text-center">
+                <dd class="text-2xl font-bold text-white">{stat.value}</dd>
+                <dt class="mt-1 text-xs uppercase tracking-wider text-white/40">{stat.label}</dt>
+              </div>
+            ))
+          }
+        </dl>
+      </section>
+
+      <section class="reveal">
+        <h2 class="mb-6 text-sm uppercase tracking-widest text-white/40">The planets</h2>
+        <PlanetGrid client:visible planets={planets} />
+      </section>
+
+      <section class="reveal rounded-3xl border border-white/10 bg-white/5 p-8 text-center backdrop-blur-xl sm:p-10">
+        <h2 class="text-sm uppercase tracking-widest text-white/40">Get in touch</h2>
+        <p class="mt-4 text-white/70">Always happy to talk robots, business, or Chopin.</p>
+        <div class="mt-6 flex flex-wrap justify-center gap-3">
+          <a
+            href={SITE.contact.github}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-full border border-white/25 px-5 py-2 text-sm text-white/90 transition hover:bg-white/10"
+          >
+            GitHub
+          </a>
+          <a
+            href={SITE.contact.linkedin}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="rounded-full border border-white/25 px-5 py-2 text-sm text-white/90 transition hover:bg-white/10"
+          >
+            LinkedIn
+          </a>
+        </div>
+      </section>
+
+      <footer class="text-center text-[10px] text-white/30">
+        Planet textures: <a href="https://www.solarsystemscope.com/textures/" class="underline">Solar System Scope</a> (CC BY 4.0)
+      </footer>
+    </div>
+  </main>
+
+  <!-- Saturn V that rides the helix between sections (NASA image, public domain) -->
+  <div id="scroll-rocket" aria-hidden="true">
+    <img src="/assets/rocket.png" alt="" />
+  </div>
+
+  <!-- Server-rendered markdown bodies, lifted by ContentModal on focus -->
+  {
+    rendered.map(({ id, Content }) => (
+      <template id={`planet-content-${id}`}>
+        <Content />
+      </template>
+    ))
+  }
+
+  <!-- About Me body for the top-left HeroCard modal -->
+  {
+    AboutContent && (
+      <template id="about-content">
+        <AboutContent />
+      </template>
+    )
+  }
+
+  <script>
+    // Fade sections in as they scroll into view.
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('revealed');
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.15 },
+    );
+    document.querySelectorAll('.reveal').forEach((el) => observer.observe(el));
+
+    // Scroll rocket: descends a helical path that weaves around the portfolio
+    // cards — in front of the glass on one half of each loop, behind it on
+    // the other. The path itself is drawn as a faint white dashed sine curve.
+    const rocket = document.getElementById('scroll-rocket');
+    const zone = document.getElementById('portfolio-sections');
+    const main = document.querySelector('main');
+    if (rocket && zone && main) {
+      const PERIOD = 1700; // px of page travel per helix loop (bigger = slower weave)
+      const HALF = 60; // half the shuttle wrapper size, for center anchoring
+      let amplitude = 0;
+      let centerX = 0;
+      let zoneTop = 0; // document-space top of the sections column
+      let zoneHeight = 0;
+
+      // The white helix path, drawn in document space behind the cards.
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(svgNS, 'svg');
+      const path = document.createElementNS(svgNS, 'path');
+      svg.appendChild(path);
+      svg.setAttribute('aria-hidden', 'true');
+      svg.style.cssText = 'position:absolute;left:0;overflow:visible;pointer-events:none;z-index:0;';
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', 'rgba(255,255,255,0.4)');
+      path.setAttribute('stroke-width', '2');
+      path.setAttribute('stroke-dasharray', '7 11');
+      path.setAttribute('stroke-linecap', 'round');
+
+      // Flame streak: the same geometry drawn as a glowing orange stroke,
+      // revealed only over the portion the rocket has actually flown.
+      const flameGlow = document.createElementNS(svgNS, 'path');
+      const flameCore = document.createElementNS(svgNS, 'path');
+      flameGlow.setAttribute('fill', 'none');
+      flameGlow.setAttribute('stroke', '#ff8c2a');
+      flameGlow.setAttribute('stroke-width', '10');
+      flameGlow.setAttribute('stroke-opacity', '0.25');
+      flameGlow.setAttribute('stroke-linecap', 'round');
+      flameCore.setAttribute('fill', 'none');
+      flameCore.setAttribute('stroke', '#ffcf5c');
+      flameCore.setAttribute('stroke-width', '3.5');
+      flameCore.setAttribute('stroke-opacity', '0.85');
+      flameCore.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(flameGlow);
+      svg.appendChild(flameCore);
+      main.prepend(svg);
+
+      const helixX = (docY: number) =>
+        centerX + amplitude * Math.sin((2 * Math.PI * (docY - zoneTop)) / PERIOD);
+      const helixDepth = (docY: number) =>
+        Math.cos((2 * Math.PI * (docY - zoneTop)) / PERIOD); // 1 = front, -1 = behind
+
+      const STEP = 22;
+      let cumLen: number[] = []; // arc length at each sampled y
+      let totalLen = 0;
+      let aboutBottom = 0; // document-space bottom of the About card
+
+      const buildPath = () => {
+        const rect = zone.getBoundingClientRect();
+        zoneTop = rect.top + window.scrollY;
+        zoneHeight = zone.offsetHeight;
+        centerX = window.innerWidth / 2;
+        // Swing wider than the cards so the loop reads as circling them.
+        const cardHalf = Math.min(896, window.innerWidth - 32) / 2;
+        amplitude = Math.min(window.innerWidth / 2 - 26, cardHalf + 60);
+        let d = '';
+        cumLen = [0];
+        let prevX = helixX(zoneTop);
+        for (let y = 0; y <= zoneHeight; y += STEP) {
+          const x = helixX(zoneTop + y);
+          d += `${y === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
+          if (y > 0) cumLen.push(cumLen[cumLen.length - 1] + Math.hypot(x - prevX, STEP));
+          prevX = x;
+        }
+        totalLen = cumLen[cumLen.length - 1];
+        const about = zone.querySelector('section');
+        aboutBottom = about ? zoneTop + about.offsetTop + about.offsetHeight : zoneTop;
+        path.setAttribute('d', d);
+        flameGlow.setAttribute('d', d);
+        flameCore.setAttribute('d', d);
+        svg.setAttribute('width', String(window.innerWidth));
+        svg.setAttribute('height', String(zoneHeight));
+        svg.style.top = `${zone.offsetTop}px`;
+      };
+      buildPath();
+      window.addEventListener('resize', buildPath);
+
+      // Arc length flown so far, from the rocket's document-space position.
+      const arcAt = (docY: number) => {
+        const yLocal = Math.min(Math.max(docY - zoneTop, 0), zoneHeight);
+        const i = Math.min(Math.floor(yLocal / STEP), cumLen.length - 2);
+        const frac = yLocal / STEP - i;
+        return cumLen[i] + (cumLen[i + 1] - cumLen[i]) * frac;
+      };
+
+      const FLAME_TAIL = 260; // streak length behind the rocket when climbing
+      const setFlame = (dash: string) => {
+        flameGlow.setAttribute('stroke-dasharray', dash);
+        flameCore.setAttribute('stroke-dasharray', dash);
+      };
+
+      let idleTimer: ReturnType<typeof setTimeout>;
+      let lastY = window.scrollY;
+      let direction = 1; // 1 = scrolling down (rocket dives), -1 = up
+      let rotRad = Math.PI; // current heading
+      let lastRotDeg = 180; // unwrapped, so the CSS transition never spins 360°
+
+      const update = () => {
+        const max = document.documentElement.scrollHeight - window.innerHeight;
+        const progress = max > 0 ? window.scrollY / max : 0;
+        const dy = window.scrollY - lastY;
+        if (Math.abs(dy) > 2) direction = dy > 0 ? 1 : -1;
+        lastY = window.scrollY;
+
+        // The rocket's CENTER rides at 45% viewport height, on the helix.
+        const anchorY = window.innerHeight * 0.45;
+        const docY = window.scrollY + anchorY;
+
+        // Finale: over the last stretch of scrolling the rocket accelerates
+        // ahead ALONG the helix, reaching the path's end exactly at full
+        // scroll while fading out. Same curve functions => never off-path.
+        const pathEnd = zoneTop + zoneHeight;
+        let docYb = docY;
+        let endFade = 1;
+        if (progress > 0.86) {
+          const t = Math.min((progress - 0.86) / 0.14, 1);
+          docYb = docY + (pathEnd - docY) * t * t; // ease-in surge to the end
+          endFade = Math.max(0, 1 - Math.max(0, (t - 0.45) / 0.55));
+        }
+        docYb = Math.min(docYb, pathEnd);
+
+        const x = helixX(docYb);
+        const depth = helixDepth(docYb);
+        const scale = 0.8 + 0.2 * depth;
+        // Face the tangent of the path: velocity is (slope, ±1) in screen
+        // space; the model's nose points up at rotation 0.
+        const slope = amplitude * ((2 * Math.PI) / PERIOD) * depth;
+        rotRad = direction >= 0 ? Math.atan2(slope, -1) : Math.atan2(-slope, 1);
+        const rotDeg = (rotRad * 180) / Math.PI;
+        // Unwrap the heading so the transform transition never takes the long
+        // way around (which read as a 360° flip at the helix corners).
+        let rot = rotDeg;
+        while (rot - lastRotDeg > 180) rot -= 360;
+        while (rot - lastRotDeg < -180) rot += 360;
+        lastRotDeg = rot;
+
+        rocket.style.left = `${x - HALF}px`;
+        // Screen position derives from the (possibly surged) path point, so
+        // during the finale the rocket visibly travels down the curve.
+        rocket.style.top = `${docYb - window.scrollY - HALF}px`;
+
+        // Over the About card the original weave stays (front on one half of
+        // the loop, faded behind glass on the other). Past it, the rocket
+        // always flies UNDER the glassy cards, fully visible through them.
+        const inAbout = docYb < aboutBottom + 40;
+        const gate = progress > 0.03 ? 1 : 0;
+        if (inAbout) {
+          rocket.style.zIndex = depth >= 0 ? '15' : '5';
+          rocket.style.opacity = `${gate * endFade * (depth >= 0 ? 1 : 0.12)}`;
+        } else {
+          rocket.style.zIndex = '5';
+          rocket.style.opacity = `${gate * endFade}`;
+        }
+        rocket.style.transform = `rotate(${rot}deg) scale(${scale})`;
+
+        // Flame streak: while descending it marks the entire flown path;
+        // while climbing it flips to a short tail trailing below the rocket.
+        const s = arcAt(docYb);
+        if (progress <= 0.03) {
+          setFlame(`0 ${totalLen + 10}`); // hidden in the hero
+        } else if (direction >= 0) {
+          setFlame(`${s.toFixed(1)} ${Math.max(totalLen - s, 0) + 10}`);
+        } else {
+          setFlame(`0 ${s.toFixed(1)} ${FLAME_TAIL} ${totalLen + 10}`);
+        }
+
+        rocket.classList.add('flying');
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => rocket.classList.remove('flying'), 350);
+      };
+
+      // Capturing document listener: catches viewport scrolls in every
+      // browser, including ones that don't surface them on window.
+      document.addEventListener('scroll', update, { passive: true, capture: true });
+    }
+  </script>
+</Layout>

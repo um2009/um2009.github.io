@@ -1,0 +1,95 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  overflow-x: hidden;
+  background: #070512;
+  color: #fff;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  scroll-behavior: smooth;
+}
+
+/* Soft pulse for the "scroll for more" cue */
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+.scroll-cue {
+  animation: soft-pulse 2s ease-in-out infinite;
+}
+
+/* Scroll rocket: flies up the center gutter, behind the glass cards so it
+   blurs through them, flame + wobble only while actively scrolling */
+#scroll-rocket {
+  position: fixed;
+  left: 50%;
+  top: 45%;
+  z-index: 5;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  /* no left/top transitions: position must track the helix exactly */
+  transition:
+    opacity 0.35s ease,
+    transform 0.12s linear;
+}
+#scroll-rocket img {
+  height: 112px;
+  width: auto;
+  filter: drop-shadow(0 0 8px rgba(255, 200, 120, 0.25));
+}
+
+/* (rocket flame is drawn as an SVG streak along the helix path — see index.astro) */
+#scroll-rocket .flame {
+  transform-origin: 50% 0%;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+#scroll-rocket.flying .flame {
+  opacity: 1;
+  animation: flame-flicker 0.18s ease-in-out infinite alternate;
+}
+#scroll-rocket.flying .ship {
+  animation: rocket-wobble 0.35s ease-in-out infinite alternate;
+}
+@keyframes flame-flicker {
+  from {
+    transform: scaleY(0.75) scaleX(0.9);
+  }
+  to {
+    transform: scaleY(1.15) scaleX(1.05);
+  }
+}
+@keyframes rocket-wobble {
+  from {
+    transform: rotate(-2.5deg);
+  }
+  to {
+    transform: rotate(2.5deg);
+  }
+}
+
+/* Scroll-reveal for the portfolio sections */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+}
+.reveal.revealed {
+  opacity: 1;
+  transform: none;
+}
