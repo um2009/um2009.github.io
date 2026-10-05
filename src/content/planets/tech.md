@@ -10,7 +10,7 @@ texture: "/assets/textures/neptune.jpg"
 planetSize: 2.5
 ---
 
-## Neptune
+## District IT Internship
 
 - Diagnosed, repaired, and restored functionality for 400+ district devices, recouping $150,000 in district asset value via component-level troubleshooting
 

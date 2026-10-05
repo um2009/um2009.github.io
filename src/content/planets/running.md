@@ -2,7 +2,7 @@
 title: "Running"
 description: "I love running, and was part of my school's Cross Country team my junior year"
 pubDate: 2026-07-04
-tags: ["Placeholder"]
+tags: ["Athletics"]
 category: "sports"
 planetColor: "#7FDBDA"
 orbitRadius: 41
